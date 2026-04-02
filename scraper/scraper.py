@@ -5,6 +5,7 @@ Column positions and Tesseract path now come from config.py.
 """
 import os
 import copy
+import json
 import time
 import numpy as np
 import cv2
@@ -18,6 +19,8 @@ import config
 
 pytesseract.pytesseract.tesseract_cmd = config.TESSERACT_PATH
 
+CALIBRATION_FILE = os.path.join(os.path.dirname(__file__), "calibration.json")
+
 
 class MarketplaceScraper:
     def __init__(self):
@@ -27,8 +30,33 @@ class MarketplaceScraper:
         self.num_visible_rows = config.NUM_VISIBLE_ROWS
         self.rarity_colors = config.RARITY_COLORS
         self.debug_folder = config.DEBUG_FOLDER
+        self.test_images_folder = os.path.join(os.path.dirname(__file__), "test_images")
 
         os.makedirs(self.debug_folder, exist_ok=True)
+        os.makedirs(self.test_images_folder, exist_ok=True)
+        self._load_calibration()
+
+    def _load_calibration(self):
+        if not os.path.exists(CALIBRATION_FILE):
+            return
+        with open(CALIBRATION_FILE) as f:
+            data = json.load(f)
+        self.columns = data.get("columns", self.columns)
+        self.first_row_y = data.get("first_row_y", self.first_row_y)
+        self.row_height = data.get("row_height", self.row_height)
+        self.num_visible_rows = data.get("num_visible_rows", self.num_visible_rows)
+        print(f"Loaded calibration from {CALIBRATION_FILE}")
+
+    def _save_calibration(self):
+        data = {
+            "columns": self.columns,
+            "first_row_y": self.first_row_y,
+            "row_height": self.row_height,
+            "num_visible_rows": self.num_visible_rows,
+        }
+        with open(CALIBRATION_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"Calibration saved to {CALIBRATION_FILE}")
 
     # ── Screen capture ─────────────────────────────────────────────────────
 
@@ -39,37 +67,61 @@ class MarketplaceScraper:
 
     def capture_full_table(self, save_debug=True):
         print("Capturing marketplace table...")
-        full_height = self.first_row_y + (self.row_height * self.num_visible_rows) + 10
-        full_width = 1400
+        full_height = self.first_row_y + (self.row_height * self.num_visible_rows) + 80
+        rightmost = max(c["x"] + c["width"] for c in self.columns.values())
+        full_width = rightmost + 50
         full_table = pyautogui.screenshot(region=(0, 0, full_width, full_height))
         if save_debug:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            full_table.save(os.path.join(self.debug_folder, f"full_table_{ts}.png"))
+            full_table.save(os.path.join(self.test_images_folder, f"full_table_{ts}.png"))
         return np.array(full_table)
 
     # ── OCR ────────────────────────────────────────────────────────────────
 
     def extract_text_from_image(self, image, is_numeric=False, debug_name=None):
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        gray = cv2.convertScaleAbs(gray, alpha=1.5, beta=0)
-        thresh = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, 11, 2
-        )
+        # Convert RGB screenshot to grayscale (pyautogui returns RGB)
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+        # Invert: dark game background → white, bright text → dark
+        inverted = cv2.bitwise_not(gray)
+
+        # Fixed threshold at 200: after inversion all text colors land below 200
+        # (purple≈145, orange≈98, green≈111, white≈35) while background lands
+        # at ~218. Gives clean black text on white for every rarity color.
+        _, binary = cv2.threshold(inverted, 200, 255, cv2.THRESH_BINARY)
+
+        # Upscale — Tesseract accuracy improves significantly on larger images
+        scale = 3
+        binary = cv2.resize(binary, None, fx=scale, fy=scale,
+                            interpolation=cv2.INTER_CUBIC)
+
         if debug_name:
             cv2.imwrite(os.path.join(self.debug_folder, f"{debug_name}_original.png"), image)
-            cv2.imwrite(os.path.join(self.debug_folder, f"{debug_name}_processed.png"), thresh)
+            cv2.imwrite(os.path.join(self.debug_folder, f"{debug_name}_processed.png"), binary)
 
         custom_config = "--psm 7 --oem 3"
         if is_numeric:
             custom_config += ' -c tessedit_char_whitelist="0123456789,.x"'
-        return pytesseract.image_to_string(thresh, config=custom_config).strip()
+        text = pytesseract.image_to_string(binary, config=custom_config).strip()
+        if not is_numeric:
+            text = text.lstrip('|/\\!@#$%^&*()[]{}<>~`\' \t')
+        return text
 
     def extract_cell_text(self, row_index, column_name, full_table=None):
         x = self.columns[column_name]["x"]
         width = self.columns[column_name]["width"]
         y = self.first_row_y + (row_index * self.row_height)
-        height = self.row_height - 5
+        # Text sits in the top portion of each row; the bottom half is
+        # separator lines and padding that corrupt OCR output.
+        top_pad = 4
+        y = y + top_pad
+        height = (self.row_height // 2) - top_pad
+
+        # Skip the item icon on the left side of item_name cells
+        if column_name == "item_name":
+            icon_offset = 50
+            x = x + icon_offset
+            width = max(width - icon_offset, 1)
 
         if full_table is not None:
             cell_image = full_table[y:y+height, x:x+width]
@@ -244,3 +296,4 @@ class MarketplaceScraper:
         print(f"  first_row_y={self.first_row_y}, row_height={self.row_height}, rows={self.num_visible_rows}")
         for col_name, dims in self.columns.items():
             print(f"  {col_name}: x={dims['x']}, width={dims['width']}")
+        self._save_calibration()

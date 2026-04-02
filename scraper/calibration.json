@@ -1,0 +1,43 @@
+{
+  "columns": {
+    "item_name": {
+      "x": 54,
+      "width": 263
+    },
+    "rarity": {
+      "x": 317,
+      "width": 191
+    },
+    "slot": {
+      "x": 508,
+      "width": 187
+    },
+    "type": {
+      "x": 695,
+      "width": 191
+    },
+    "static_attribute": {
+      "x": 886,
+      "width": 188
+    },
+    "random_attribute": {
+      "x": 1074,
+      "width": 189
+    },
+    "expires": {
+      "x": 1263,
+      "width": 188
+    },
+    "price": {
+      "x": 1451,
+      "width": 114
+    },
+    "quantity": {
+      "x": 1565,
+      "width": 151
+    }
+  },
+  "first_row_y": 324,
+  "row_height": 60,
+  "num_visible_rows": 10
+}

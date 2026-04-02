@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
@@ -48,7 +49,7 @@ async function start() {
       console.log(`Dark & Darker Market API running on port ${PORT}`);
     });
   } catch (err) {
-    console.error("Startup error:", err.message);
+    console.error("Startup error:", err.message, err.stack);
     process.exit(1);
   }
 }

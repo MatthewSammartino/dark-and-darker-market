@@ -72,19 +72,24 @@ def save_items(items):
     if not items:
         return 0
 
+    def _trunc(val, length):
+        if val is None:
+            return None
+        return str(val).strip()[:length] or None
+
     inserted = 0
     with _connect() as conn:
         with conn.cursor() as cur:
             for item in items:
-                item_name = (item.get("item_name") or "").strip()
+                item_name = (item.get("item_name") or "").strip()[:255]
                 if not item_name:
                     continue
 
                 item_id = _upsert_item(
                     cur,
                     item_name,
-                    item.get("slot"),
-                    item.get("type"),
+                    _trunc(item.get("slot"), 64),
+                    _trunc(item.get("type"), 64),
                 )
                 if item_id is None:
                     continue
@@ -106,9 +111,9 @@ def save_items(items):
                         int(unit_price) if unit_price is not None else None,
                         item.get("quantity") or 1,
                         bool(item.get("is_stack")),
-                        item.get("rarity") or None,
-                        item.get("static_attribute") or None,
-                        item.get("random_attribute") or None,
+                        _trunc(item.get("rarity"), 32),
+                        _trunc(item.get("static_attribute"), 500),
+                        _trunc(item.get("random_attribute"), 500),
                         item.get("expires") or None,
                         item.get("timestamp") or datetime.now(timezone.utc).isoformat(),
                         json.dumps(item),
