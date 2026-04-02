@@ -1,0 +1,9 @@
+node_modules/
+server/dist/
+server/node_modules/
+.env
+*.csv
+debug_images/
+__pycache__/
+*.pyc
+.venv/
