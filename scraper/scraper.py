@@ -29,6 +29,8 @@ class MarketplaceScraper:
         self.num_visible_rows = config.NUM_VISIBLE_ROWS
         self.rarity_colors = config.RARITY_COLORS
         self.debug_folder = config.DEBUG_FOLDER
+        self.refresh_button_x = config.REFRESH_BUTTON_X
+        self.refresh_button_y = config.REFRESH_BUTTON_Y
         self.test_images_folder = os.path.join(os.path.dirname(__file__), "test_images")
 
         os.makedirs(self.debug_folder, exist_ok=True)
@@ -45,6 +47,8 @@ class MarketplaceScraper:
         self.first_row_y = data.get("first_row_y", self.first_row_y)
         self.row_height = data.get("row_height", self.row_height)
         self.num_visible_rows = data.get("num_visible_rows", self.num_visible_rows)
+        self.refresh_button_x = data.get("refresh_button_x", config.REFRESH_BUTTON_X)
+        self.refresh_button_y = data.get("refresh_button_y", config.REFRESH_BUTTON_Y)
         print(f"Loaded calibration from {CALIBRATION_FILE}")
 
     def _save_calibration(self):
@@ -53,6 +57,8 @@ class MarketplaceScraper:
             "first_row_y": self.first_row_y,
             "row_height": self.row_height,
             "num_visible_rows": self.num_visible_rows,
+            "refresh_button_x": self.refresh_button_x,
+            "refresh_button_y": self.refresh_button_y,
         }
         with open(CALIBRATION_FILE, "w") as f:
             json.dump(data, f, indent=2)
@@ -165,9 +171,10 @@ class MarketplaceScraper:
 
     # ── Main scrape ────────────────────────────────────────────────────────
 
-    def scrape_marketplace_items(self, save_images=True):
-        print("Scraping marketplace items...")
-        full_table = self.capture_full_table(save_debug=save_images)
+    def scrape_marketplace_items(self, save_images=True, full_table=None):
+        if full_table is None:
+            print("Scraping marketplace items...")
+            full_table = self.capture_full_table(save_debug=save_images)
         items = []
 
         for row_index in range(self.num_visible_rows):
@@ -220,9 +227,9 @@ class MarketplaceScraper:
         return items
 
     def click_refresh_button(self):
-        pyautogui.click(config.REFRESH_BUTTON_X, config.REFRESH_BUTTON_Y)
-        print("Clicked refresh button")
-        time.sleep(2)
+        pyautogui.click(self.refresh_button_x, self.refresh_button_y)
+        print(f"Clicked refresh button at ({self.refresh_button_x}, {self.refresh_button_y})")
+        time.sleep(3)
 
     # ── Calibration helpers ────────────────────────────────────────────────
 

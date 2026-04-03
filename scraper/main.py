@@ -42,18 +42,21 @@ def main():
     print("================================")
     print("1. Calibrate table layout")
     print("2. Capture test screenshot")
-    print("3. Run marketplace scan")
-    choice = input("Enter choice (1-3): ").strip()
-
-    scraper = MarketplaceScraper()
+    print("3. Live scan (OCR + DB, real time)")
+    print("4. Capture session  — F9 to snap, F7 to quit  [no OCR]")
+    print("5. Process queue    — OCR + DB on saved screenshots")
+    choice = input("Enter choice (1-5): ").strip()
 
     if choice == "1":
+        scraper = MarketplaceScraper()
         scraper.calibrate_table_layout(wait_for_key=True)
 
     elif choice == "2":
+        scraper = MarketplaceScraper()
         scraper.capture_test_screenshot(wait_for_key=True)
 
     elif choice == "3":
+        scraper = MarketplaceScraper()
         try:
             num_refreshes = int(input("Number of refreshes (1-20): "))
             num_refreshes = max(1, min(num_refreshes, 20))
@@ -63,6 +66,14 @@ def main():
         print("\nSwitch to your game window.")
         scraper.wait_for_trigger_key("space")
         run_scan(scraper, num_refreshes)
+
+    elif choice == "4":
+        import capture
+        capture.main()
+
+    elif choice == "5":
+        import processor
+        processor.main()
 
     else:
         print("Invalid choice.")

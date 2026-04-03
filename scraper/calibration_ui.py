@@ -31,10 +31,11 @@ _PALETTE = [
     "#FFA94D", "#63E6BE",
 ]
 
-_STEPS = [{"key": "_row", "label": 'Draw a box around the FIRST ROW (full width, full height of one row)'}] + [
-    {"key": col, "label": f'Draw a box around any cell in the "{col}" column'}
-    for col in config.COLUMNS
-]
+_STEPS = (
+    [{"key": "_row", "label": 'Draw a box around the FIRST ROW (full width, full height of one row)'}]
+    + [{"key": col, "label": f'Draw a box around any cell in the "{col}" column'} for col in config.COLUMNS]
+    + [{"key": "_refresh", "label": 'Draw a box around the REFRESH button'}]
+)
 
 
 # ── Countdown window ──────────────────────────────────────────────────────────
@@ -258,11 +259,23 @@ class _CalibrationWindow:
             else:
                 columns[col] = current_columns.get(col, dict(config.COLUMNS[col]))
 
+        # Refresh button — use center of drawn box
+        refresh_box = self._drawn.get("_refresh")
+        if refresh_box:
+            rx1, ry1, rx2, ry2 = refresh_box
+            refresh_x = (rx1 + rx2) // 2
+            refresh_y = (ry1 + ry2) // 2
+        else:
+            refresh_x = config.REFRESH_BUTTON_X
+            refresh_y = config.REFRESH_BUTTON_Y
+
         return {
             "columns": columns,
             "first_row_y": first_row_y,
             "row_height": row_height,
             "num_visible_rows": getattr(self, "_num_rows", 10),
+            "refresh_button_x": refresh_x,
+            "refresh_button_y": refresh_y,
         }
 
 
