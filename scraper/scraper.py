@@ -1,7 +1,7 @@
 """
 OCR pipeline for the Dark and Darker marketplace.
-Ported from marketdatascraper.py — core OCR logic is unchanged.
-Column positions and Tesseract path now come from config.py.
+Ported from marketdatascraper.py — uses EasyOCR instead of Tesseract.
+Column positions now come from config.py.
 """
 import os
 import copy
@@ -10,14 +10,13 @@ import time
 import numpy as np
 import cv2
 import pyautogui
-import pytesseract
 import keyboard
 from datetime import datetime
 from PIL import Image
 
-import config
+import easyocr
 
-pytesseract.pytesseract.tesseract_cmd = config.TESSERACT_PATH
+import config
 
 CALIBRATION_FILE = os.path.join(os.path.dirname(__file__), "calibration.json")
 
@@ -35,6 +34,7 @@ class MarketplaceScraper:
         os.makedirs(self.debug_folder, exist_ok=True)
         os.makedirs(self.test_images_folder, exist_ok=True)
         self._load_calibration()
+        self.reader = easyocr.Reader(['en'], gpu=False)
 
     def _load_calibration(self):
         if not os.path.exists(CALIBRATION_FILE):
@@ -79,31 +79,22 @@ class MarketplaceScraper:
     # ── OCR ────────────────────────────────────────────────────────────────
 
     def extract_text_from_image(self, image, is_numeric=False, debug_name=None):
-        # Convert RGB screenshot to grayscale (pyautogui returns RGB)
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-
-        # Invert: dark game background → white, bright text → dark
-        inverted = cv2.bitwise_not(gray)
-
-        # Fixed threshold at 200: after inversion all text colors land below 200
-        # (purple≈145, orange≈98, green≈111, white≈35) while background lands
-        # at ~218. Gives clean black text on white for every rarity color.
-        _, binary = cv2.threshold(inverted, 200, 255, cv2.THRESH_BINARY)
-
-        # Upscale — Tesseract accuracy improves significantly on larger images
-        scale = 3
-        binary = cv2.resize(binary, None, fx=scale, fy=scale,
-                            interpolation=cv2.INTER_CUBIC)
-
         if debug_name:
             cv2.imwrite(os.path.join(self.debug_folder, f"{debug_name}_original.png"), image)
-            cv2.imwrite(os.path.join(self.debug_folder, f"{debug_name}_processed.png"), binary)
 
-        custom_config = "--psm 7 --oem 3"
+        # Upscale so CRAFT can resolve small cell text
+        scale = 3
+        image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+        results = self.reader.readtext(image, detail=1, text_threshold=0.4, low_text=0.3)
+        # Sort left-to-right by bounding box x so multi-word names read in order
+        results.sort(key=lambda r: r[0][0][0])
+        # results: list of ([bbox], text, confidence)
+        text = " ".join(r[1] for r in results if r[2] >= config.OCR_MIN_CONFIDENCE).strip()
+
         if is_numeric:
-            custom_config += ' -c tessedit_char_whitelist="0123456789,.x"'
-        text = pytesseract.image_to_string(binary, config=custom_config).strip()
-        if not is_numeric:
+            text = "".join(c for c in text if c.isdigit() or c in ".,x")
+        else:
             text = text.lstrip('|/\\!@#$%^&*()[]{}<>~`\' \t')
         return text
 
@@ -111,17 +102,11 @@ class MarketplaceScraper:
         x = self.columns[column_name]["x"]
         width = self.columns[column_name]["width"]
         y = self.first_row_y + (row_index * self.row_height)
-        # Text sits in the top portion of each row; the bottom half is
-        # separator lines and padding that corrupt OCR output.
+        # Use full row height — EasyOCR ignores separator lines, unlike Tesseract.
+        # Small top pad to avoid bleed from the row above.
         top_pad = 4
         y = y + top_pad
-        height = (self.row_height // 2) - top_pad
-
-        # Skip the item icon on the left side of item_name cells
-        if column_name == "item_name":
-            icon_offset = 50
-            x = x + icon_offset
-            width = max(width - icon_offset, 1)
+        height = self.row_height - top_pad
 
         if full_table is not None:
             cell_image = full_table[y:y+height, x:x+width]
@@ -155,8 +140,9 @@ class MarketplaceScraper:
     def extract_price_value(self, price_text):
         if not price_text:
             return None
-        clean = "".join(c for c in price_text if c.isdigit() or c in ".,")\
-                  .replace(",", "")
+        # D&D prices are whole numbers; strip both . and , (OCR may read
+        # "7,000" as "7.000" depending on font/rendering)
+        clean = "".join(c for c in price_text if c.isdigit())
         try:
             return float(clean)
         except ValueError:
@@ -164,18 +150,18 @@ class MarketplaceScraper:
 
     def extract_quantity(self, quantity_text):
         if not quantity_text or "x" not in quantity_text.lower():
-            return None, None
+            return None
+        # Format: "103.3x3" — left side is the game's display unit price (total/qty,
+        # often non-integer), right side is the stack count.
+        # We only take the count here; unit_price is computed from the actual total.
         parts = quantity_text.lower().split("x")
         if len(parts) != 2:
-            return None, None
+            return None
         try:
-            unit_price = float(
-                "".join(c for c in parts[0] if c.isdigit() or c in ".,").replace(",", "")
-            )
             quantity = int("".join(c for c in parts[1] if c.isdigit()))
-            return unit_price, quantity
+            return quantity
         except ValueError:
-            return None, None
+            return None
 
     # ── Main scrape ────────────────────────────────────────────────────────
 
@@ -200,7 +186,10 @@ class MarketplaceScraper:
                 quantity_text,    _          = self.extract_cell_text(row_index, "quantity",          full_table)
 
                 price_value = self.extract_price_value(price_text)
-                unit_price, quantity = self.extract_quantity(quantity_text)
+                quantity = self.extract_quantity(quantity_text)
+                # Compute unit price from total rather than the OCR'd display value
+                # (the game shows a rounded decimal like "103.3" which isn't reliable)
+                unit_price = (price_value / quantity) if (price_value and quantity and quantity > 1) else None
 
                 if not rarity_text or rarity_text not in self.rarity_colors:
                     detected = self.detect_rarity_from_color(item_name_img)
@@ -217,7 +206,7 @@ class MarketplaceScraper:
                     "expires":         expires_text,
                     "price":           price_value,
                     "price_text":      price_text,
-                    "is_stack":        bool(unit_price and quantity),
+                    "is_stack":        bool(quantity and quantity > 1),
                     "unit_price":      unit_price,
                     "quantity":        quantity,
                     "timestamp":       datetime.now().isoformat(),
@@ -252,48 +241,10 @@ class MarketplaceScraper:
         return full_table
 
     def calibrate_table_layout(self, wait_for_key=True):
-        print("Table Layout Calibration")
-        print("------------------------")
-        if wait_for_key:
-            print("Switch to your game window.")
-            self.wait_for_trigger_key("space")
-
-        print("\nMove mouse to the top of the FIRST item row and press 'C'")
-        keyboard.wait("c")
-        self.first_row_y = pyautogui.position().y
-        print(f"First row Y = {self.first_row_y}")
-
-        print("\nFor each column: move to LEFT edge and press 'L', then RIGHT edge and press 'R'")
-        for col_name in self.columns:
-            print(f"\n  Column: {col_name}")
-            print("  Left edge → press 'L'")
-            keyboard.wait("l")
-            left_x = pyautogui.position().x
-            print("  Right edge → press 'R'")
-            keyboard.wait("r")
-            right_x = pyautogui.position().x
-            self.columns[col_name]["x"] = left_x
-            self.columns[col_name]["width"] = right_x - left_x
-            print(f"  Set: x={left_x}, width={right_x - left_x}")
-
-        print("\nMove to top of FIRST row → press 'T'")
-        keyboard.wait("t")
-        top_y = pyautogui.position().y
-        print("Move to top of SECOND row → press 'B'")
-        keyboard.wait("b")
-        bottom_y = pyautogui.position().y
-        self.row_height = bottom_y - top_y
-        print(f"Row height = {self.row_height}")
-
-        try:
-            n = int(input("How many rows are visible? (default 10): ") or "10")
-            if n > 0:
-                self.num_visible_rows = n
-        except ValueError:
-            pass
-
-        print("\nCalibration complete:")
-        print(f"  first_row_y={self.first_row_y}, row_height={self.row_height}, rows={self.num_visible_rows}")
-        for col_name, dims in self.columns.items():
-            print(f"  {col_name}: x={dims['x']}, width={dims['width']}")
-        self._save_calibration()
+        from calibration_ui import run_calibration
+        result = run_calibration(countdown=5 if wait_for_key else 0)
+        if result:
+            self.columns = result["columns"]
+            self.first_row_y = result["first_row_y"]
+            self.row_height = result["row_height"]
+            self.num_visible_rows = result["num_visible_rows"]

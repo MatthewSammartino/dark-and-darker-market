@@ -9,11 +9,11 @@ const BUCKETS   = { "1h": 1, "6h": 6, "1d": 24 };
 router.get("/trending", async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT i.id, i.name, i.slot, i.item_type,
+      `SELECT i.id, i.name, i.slot, i.item_type, i.rarity,
               COUNT(ph.id) AS volume_24h,
-              AVG(ph.unit_price)::integer AS avg_price,
-              MIN(ph.unit_price) AS low_price,
-              MAX(ph.unit_price) AS high_price
+              AVG(COALESCE(ph.unit_price, ph.price))::integer AS avg_price,
+              MIN(COALESCE(ph.unit_price, ph.price)) AS low_price,
+              MAX(COALESCE(ph.unit_price, ph.price)) AS high_price
        FROM items i
        JOIN price_history ph ON ph.item_id = i.id
        WHERE ph.observed_at > NOW() - INTERVAL '24 hours'
@@ -33,8 +33,8 @@ router.get("/latest", async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT DISTINCT ON (ph.item_id)
-              i.id, i.name, i.slot, i.item_type,
-              ph.price, ph.unit_price, ph.rarity, ph.observed_at
+              i.id, i.name, i.slot, i.item_type, i.rarity,
+              ph.price, ph.unit_price, ph.observed_at
        FROM price_history ph
        JOIN items i ON i.id = ph.item_id
        ORDER BY ph.item_id, ph.observed_at DESC

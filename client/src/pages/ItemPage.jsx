@@ -29,7 +29,7 @@ export default function ItemPage() {
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '2rem 1rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
         <h1 style={{ color: '#e8e0d0', fontSize: '1.5rem' }}>{item.name}</h1>
-        {item.latest_rarity && <RarityBadge rarity={item.latest_rarity} />}
+        {item.rarity && <RarityBadge rarity={item.rarity} />}
       </div>
       <p style={{ color: '#706050', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
         {[item.slot, item.item_type].filter(Boolean).join(' · ')}

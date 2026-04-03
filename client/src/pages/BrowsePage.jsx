@@ -12,11 +12,9 @@ export default function BrowsePage() {
   const [rarity, setRarity] = useState('')
   const [q, setQ] = useState('')
 
-  const { items, loading, error } = useItems({ slot, q, limit: 50 })
+  const { items, loading, error } = useItems({ slot, rarity, q, limit: 50 })
 
-  const filtered = rarity
-    ? items.filter(i => i.latest_rarity === rarity)
-    : items
+  const filtered = items
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '2rem 1rem', display: 'grid', gridTemplateColumns: '200px 1fr', gap: '1.5rem', alignItems: 'start' }}>

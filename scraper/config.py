@@ -1,13 +1,5 @@
 import os
 
-# ── Tesseract ────────────────────────────────────────────────────────────────
-# Override with TESSERACT_PATH env var, otherwise fall back to the default
-# Windows install location.
-TESSERACT_PATH = os.environ.get(
-    "TESSERACT_PATH",
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
-
 # ── Database ─────────────────────────────────────────────────────────────────
 # Set DATABASE_URL in a .env file next to this script (or in your shell).
 # Example: postgresql://user:pass@localhost:5432/dnd_market
@@ -46,5 +38,5 @@ RARITY_COLORS = {
     "Legendary": (0,   165, 255),
 }
 
-OCR_CONFIDENCE_THRESHOLD = 40
+OCR_MIN_CONFIDENCE = 0.5
 DEBUG_FOLDER = "debug_images"

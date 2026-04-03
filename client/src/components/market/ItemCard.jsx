@@ -9,7 +9,7 @@ export default function ItemCard({ item }) {
         onMouseLeave={e => e.currentTarget.style.borderColor = '#2a2010'}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
           <span style={{ color: '#e8e0d0', fontWeight: 600, fontSize: '0.95rem' }}>{item.name}</span>
-          {item.latest_rarity && <RarityBadge rarity={item.latest_rarity} />}
+          {item.rarity && <RarityBadge rarity={item.rarity} />}
         </div>
         <div style={{ marginTop: '0.4rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ color: '#706050', fontSize: '0.8rem' }}>{[item.slot, item.item_type].filter(Boolean).join(' · ')}</span>

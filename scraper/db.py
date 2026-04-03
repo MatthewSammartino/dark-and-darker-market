@@ -42,20 +42,23 @@ def finish_run(run_id, rows_inserted, error_message=None):
             )
 
 
-def _upsert_item(cur, item_name, slot, item_type):
+def _upsert_item(cur, item_name, rarity, slot, item_type):
     """
-    Ensure an items row exists for (name, slot) and return its UUID.
+    Ensure an items row exists for (name, rarity, slot) and return its UUID.
     Uses INSERT ... ON CONFLICT DO NOTHING then SELECT to avoid a race.
     """
     cur.execute(
-        """INSERT INTO items (name, slot, item_type)
-           VALUES (%s, %s, %s)
-           ON CONFLICT (name, COALESCE(slot, '')) DO NOTHING""",
-        (item_name, slot or None, item_type or None),
+        """INSERT INTO items (name, rarity, slot, item_type)
+           VALUES (%s, %s, %s, %s)
+           ON CONFLICT (name, COALESCE(rarity, ''), COALESCE(slot, '')) DO NOTHING""",
+        (item_name, rarity or None, slot or None, item_type or None),
     )
     cur.execute(
-        "SELECT id FROM items WHERE name = %s AND COALESCE(slot, '') = %s",
-        (item_name, slot or ""),
+        """SELECT id FROM items
+           WHERE name = %s
+             AND COALESCE(rarity, '') = %s
+             AND COALESCE(slot,   '') = %s""",
+        (item_name, rarity or "", slot or ""),
     )
     row = cur.fetchone()
     return row[0] if row else None
@@ -85,9 +88,11 @@ def save_items(items):
                 if not item_name:
                     continue
 
+                rarity = _trunc(item.get("rarity"), 32)
                 item_id = _upsert_item(
                     cur,
                     item_name,
+                    rarity,
                     _trunc(item.get("slot"), 64),
                     _trunc(item.get("type"), 64),
                 )
@@ -99,21 +104,31 @@ def save_items(items):
                 if price is None:
                     continue
 
+                # Build attributes JSONB from OCR'd attribute columns
+                static_attr = _trunc(item.get("static_attribute"), 500)
+                random_attr = _trunc(item.get("random_attribute"), 500)
+                attributes = None
+                if static_attr or random_attr:
+                    attributes = json.dumps({
+                        k: v for k, v in {
+                            "static": static_attr,
+                            "random": random_attr,
+                        }.items() if v
+                    })
+
                 cur.execute(
                     """INSERT INTO price_history
                          (item_id, price, unit_price, quantity, is_stack,
-                          rarity, static_attribute, random_attribute,
-                          expires_at, observed_at, raw_payload)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                          rarity, attributes, expires_at, observed_at, raw_payload)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         item_id,
                         int(price),
                         int(unit_price) if unit_price is not None else None,
                         item.get("quantity") or 1,
                         bool(item.get("is_stack")),
-                        _trunc(item.get("rarity"), 32),
-                        _trunc(item.get("static_attribute"), 500),
-                        _trunc(item.get("random_attribute"), 500),
+                        rarity,
+                        attributes,
                         item.get("expires") or None,
                         item.get("timestamp") or datetime.now(timezone.utc).isoformat(),
                         json.dumps(item),

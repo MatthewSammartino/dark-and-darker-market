@@ -8,11 +8,12 @@ router.get("/search", async (req, res) => {
   if (!q || q.trim().length === 0) return res.json([]);
   try {
     const { rows } = await pool.query(
-      `SELECT id, name, slot, item_type
+      `SELECT id, name, rarity, slot, item_type
        FROM items
        WHERE to_tsvector('english', name) @@ plainto_tsquery('english', $1)
           OR name ILIKE $2
-       LIMIT 20`,
+       ORDER BY name, rarity
+       LIMIT 40`,
       [q, `%${q}%`]
     );
     res.json(rows);
@@ -23,7 +24,7 @@ router.get("/search", async (req, res) => {
 
 // GET /api/items?q=&slot=&rarity=&limit=50&offset=0
 router.get("/", async (req, res) => {
-  const { q, slot, limit = 50, offset = 0 } = req.query;
+  const { q, slot, rarity, limit = 50, offset = 0 } = req.query;
   const conditions = [];
   const params = [];
 
@@ -35,19 +36,22 @@ router.get("/", async (req, res) => {
     params.push(slot);
     conditions.push(`i.slot = $${params.length}`);
   }
+  if (rarity) {
+    params.push(rarity);
+    conditions.push(`i.rarity = $${params.length}`);
+  }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   params.push(Number(limit), Number(offset));
 
   try {
     const { rows } = await pool.query(
-      `SELECT i.id, i.name, i.slot, i.item_type,
+      `SELECT i.id, i.name, i.slot, i.item_type, i.rarity,
               ph.price AS latest_price,
-              ph.rarity AS latest_rarity,
               ph.observed_at AS last_seen
        FROM items i
        LEFT JOIN LATERAL (
-         SELECT price, rarity, observed_at
+         SELECT price, observed_at
          FROM price_history
          WHERE item_id = i.id
          ORDER BY observed_at DESC
@@ -75,10 +79,10 @@ router.get("/:id", async (req, res) => {
 
     const { rows: statsRows } = await pool.query(
       `SELECT
-         MIN(unit_price) FILTER (WHERE observed_at > NOW() - INTERVAL '7 days') AS price_7d_low,
-         MAX(unit_price) FILTER (WHERE observed_at > NOW() - INTERVAL '7 days') AS price_7d_high,
-         AVG(unit_price) FILTER (WHERE observed_at > NOW() - INTERVAL '24 hours')::integer AS price_24h_avg,
-         COUNT(*)        FILTER (WHERE observed_at > NOW() - INTERVAL '24 hours') AS volume_24h
+         MIN(COALESCE(unit_price, price)) FILTER (WHERE observed_at > NOW() - INTERVAL '7 days') AS price_7d_low,
+         MAX(COALESCE(unit_price, price)) FILTER (WHERE observed_at > NOW() - INTERVAL '7 days') AS price_7d_high,
+         AVG(COALESCE(unit_price, price)) FILTER (WHERE observed_at > NOW() - INTERVAL '24 hours')::integer AS price_24h_avg,
+         COUNT(*)                         FILTER (WHERE observed_at > NOW() - INTERVAL '24 hours') AS volume_24h
        FROM price_history
        WHERE item_id = $1`,
       [req.params.id]
