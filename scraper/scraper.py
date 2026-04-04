@@ -36,7 +36,7 @@ class MarketplaceScraper:
         os.makedirs(self.debug_folder, exist_ok=True)
         os.makedirs(self.test_images_folder, exist_ok=True)
         self._load_calibration()
-        self.reader = easyocr.Reader(['en'], gpu=False)
+        self.reader = easyocr.Reader(['en'], gpu=True)
 
     def _load_calibration(self):
         if not os.path.exists(CALIBRATION_FILE):
@@ -171,59 +171,74 @@ class MarketplaceScraper:
 
     # ── Main scrape ────────────────────────────────────────────────────────
 
+    def _process_row(self, row_index: int, full_table) -> dict | None:
+        """Extract and return one marketplace row as a dict, or None if empty."""
+        item_name_text, item_name_img = self.extract_cell_text(row_index, "item_name", full_table)
+        if not item_name_text:
+            return None
+
+        rarity_text,      rarity_img = self.extract_cell_text(row_index, "rarity",           full_table)
+        slot_text,        _          = self.extract_cell_text(row_index, "slot",              full_table)
+        type_text,        _          = self.extract_cell_text(row_index, "type",              full_table)
+        static_attr_text, _          = self.extract_cell_text(row_index, "static_attribute",  full_table)
+        random_attr_text, _          = self.extract_cell_text(row_index, "random_attribute",  full_table)
+        expires_text,     _          = self.extract_cell_text(row_index, "expires",           full_table)
+        price_text,       _          = self.extract_cell_text(row_index, "price",             full_table)
+        quantity_text,    _          = self.extract_cell_text(row_index, "quantity",          full_table)
+
+        price_value = self.extract_price_value(price_text)
+        quantity = self.extract_quantity(quantity_text)
+        # Compute unit price from total rather than the OCR'd display value
+        # (the game shows a rounded decimal like "103.3" which isn't reliable)
+        unit_price = (price_value / quantity) if (price_value and quantity and quantity > 1) else None
+
+        if not rarity_text or rarity_text not in self.rarity_colors:
+            detected = self.detect_rarity_from_color(item_name_img)
+            if detected:
+                rarity_text = detected
+
+        print(f"  Row {row_index}: {item_name_text} — {rarity_text} — {price_text}")
+        return {
+            "item_name":        item_name_text,
+            "rarity":           rarity_text,
+            "slot":             slot_text,
+            "type":             type_text,
+            "static_attribute": static_attr_text,
+            "random_attribute": random_attr_text,
+            "expires":          expires_text,
+            "price":            price_value,
+            "price_text":       price_text,
+            "is_stack":         bool(quantity and quantity > 1),
+            "unit_price":       unit_price,
+            "quantity":         quantity,
+            "timestamp":        datetime.now().isoformat(),
+            "_row":             row_index,
+        }
+
     def scrape_marketplace_items(self, save_images=True, full_table=None):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         if full_table is None:
             print("Scraping marketplace items...")
             full_table = self.capture_full_table(save_debug=save_images)
-        items = []
 
-        for row_index in range(self.num_visible_rows):
-            try:
-                item_name_text, item_name_img = self.extract_cell_text(row_index, "item_name", full_table)
-                if not item_name_text:
-                    continue
+        results: dict = {}
+        workers = min(self.num_visible_rows, config.OCR_PARALLEL_WORKERS)
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(self._process_row, i, full_table): i
+                       for i in range(self.num_visible_rows)}
+            for fut in as_completed(futures):
+                row = futures[fut]
+                try:
+                    item = fut.result()
+                    if item:
+                        results[row] = item
+                except Exception as e:
+                    print(f"  Error processing row {row}: {e}")
 
-                rarity_text,      rarity_img = self.extract_cell_text(row_index, "rarity",           full_table)
-                slot_text,        _          = self.extract_cell_text(row_index, "slot",              full_table)
-                type_text,        _          = self.extract_cell_text(row_index, "type",              full_table)
-                static_attr_text, _          = self.extract_cell_text(row_index, "static_attribute",  full_table)
-                random_attr_text, _          = self.extract_cell_text(row_index, "random_attribute",  full_table)
-                expires_text,     _          = self.extract_cell_text(row_index, "expires",           full_table)
-                price_text,       _          = self.extract_cell_text(row_index, "price",             full_table)
-                quantity_text,    _          = self.extract_cell_text(row_index, "quantity",          full_table)
-
-                price_value = self.extract_price_value(price_text)
-                quantity = self.extract_quantity(quantity_text)
-                # Compute unit price from total rather than the OCR'd display value
-                # (the game shows a rounded decimal like "103.3" which isn't reliable)
-                unit_price = (price_value / quantity) if (price_value and quantity and quantity > 1) else None
-
-                if not rarity_text or rarity_text not in self.rarity_colors:
-                    detected = self.detect_rarity_from_color(item_name_img)
-                    if detected:
-                        rarity_text = detected
-
-                item = {
-                    "item_name":       item_name_text,
-                    "rarity":          rarity_text,
-                    "slot":            slot_text,
-                    "type":            type_text,
-                    "static_attribute": static_attr_text,
-                    "random_attribute": random_attr_text,
-                    "expires":         expires_text,
-                    "price":           price_value,
-                    "price_text":      price_text,
-                    "is_stack":        bool(quantity and quantity > 1),
-                    "unit_price":      unit_price,
-                    "quantity":        quantity,
-                    "timestamp":       datetime.now().isoformat(),
-                }
-                print(f"  Row {row_index}: {item_name_text} — {rarity_text} — {price_text}")
-                items.append(item)
-
-            except Exception as e:
-                print(f"  Error processing row {row_index}: {e}")
-
+        items = [results[i] for i in sorted(results)]
+        for item in items:
+            item.pop("_row", None)
         return items
 
     def click_refresh_button(self):

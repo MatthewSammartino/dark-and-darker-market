@@ -39,4 +39,5 @@ RARITY_COLORS = {
 }
 
 OCR_MIN_CONFIDENCE = 0.5
+OCR_PARALLEL_WORKERS = 2   # rows processed concurrently; GPU already parallelizes internally, keep low
 DEBUG_FOLDER = "debug_images"
